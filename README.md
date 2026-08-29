@@ -20,6 +20,17 @@ _, err := appbundle.Build(appbundle.Spec{
 })
 ```
 
+`ICNS` packs PNGs into the icon file macOS reads, in pure Go — replacing a
+shell out to `iconutil` and `sips`:
+
+```go
+icns, err := appbundle.ICNS(png16, png32, png512)
+```
+
+Each image goes in whole, under the code for its own size, so the caller
+chooses which sizes to ship: the system picks the nearest it has, and one good
+large image beats seven resampled from it.
+
 ## Why a bundle at all
 
 A bare executable is not an application on this system. AppKit reads what a
