@@ -227,3 +227,98 @@ func TestABundleHalfWrittenIsReported(t *testing.T) {
 		})
 	}
 }
+
+// TestAnApplicationCarriesItsIconAndItsKind covers the two files nothing reads
+// back: PkgInfo, which the Finder has read since before Info.plist existed, and
+// the icon, whose absence is an application drawn as a blank page everywhere it
+// appears.
+func TestAnApplicationCarriesItsIconAndItsKind(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "built")
+	if err := os.WriteFile(exe, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := Build(Spec{
+		Dir: dir, Name: "godl", Identifier: "io.example.godl",
+		Executable: exe, Icon: []byte("icns bytes"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, err := os.ReadFile(filepath.Join(b.Path, "Contents", "PkgInfo"))
+	if err != nil || string(kind) != "APPL????" {
+		t.Errorf("PkgInfo = %q, %v", kind, err)
+	}
+	icon, err := os.ReadFile(filepath.Join(b.Path, "Contents", "Resources", "godl.icns"))
+	if err != nil || string(icon) != "icns bytes" {
+		t.Errorf("the icon = %q, %v", icon, err)
+	}
+	plist, _ := os.ReadFile(filepath.Join(b.Path, "Contents", "Info.plist"))
+	if !strings.Contains(string(plist), "<key>CFBundleIconFile</key>") {
+		t.Error("the bundle carries an icon it never mentions")
+	}
+
+	// And an application with no icon says nothing about one, rather than
+	// naming a file that is not there.
+	b2, err := Build(Spec{Dir: dir, Name: "plain", Identifier: "io.example.plain", Executable: exe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(b2.Path, "Contents", "Resources")); !os.IsNotExist(err) {
+		t.Error("an application with no icon was given somewhere to keep one")
+	}
+	plist2, _ := os.ReadFile(filepath.Join(b2.Path, "Contents", "Info.plist"))
+	if strings.Contains(string(plist2), "CFBundleIconFile") {
+		t.Error("an application with no icon names one anyway")
+	}
+}
+
+// TestTheLaterFilesCanFailToo covers the writes added after Info.plist. Each
+// leaves a bundle the system will still launch, which is what makes a partial
+// assembly worth refusing rather than reporting.
+func TestTheLaterFilesCanFailToo(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "built")
+	if err := os.WriteFile(exe, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := Spec{Dir: dir, Name: "app", Identifier: "io.example.app",
+		Executable: exe, Icon: []byte("icns")}
+	full := errors.New("the disk is full")
+
+	failOn := func(part string) func() {
+		return func() {
+			writeFile = func(p string, b []byte, m os.FileMode) error {
+				if strings.Contains(p, part) {
+					return full
+				}
+				return os.WriteFile(p, b, m)
+			}
+		}
+	}
+	cases := map[string]func(){
+		"what kind of thing it is": failOn("PkgInfo"),
+		"the icon itself":          failOn(".icns"),
+		"somewhere to keep it": func() {
+			calls := 0
+			mkdirAll = func(p string, m os.FileMode) error {
+				calls++
+				if calls == 1 {
+					return os.MkdirAll(p, m) // Contents/MacOS
+				}
+				return full // Contents/Resources
+			}
+		},
+	}
+	for name, stage := range cases {
+		t.Run(name, func(t *testing.T) {
+			savedMk, savedWr := mkdirAll, writeFile
+			t.Cleanup(func() { mkdirAll, writeFile = savedMk, savedWr })
+			stage()
+			if _, err := Build(spec); err == nil {
+				t.Error("a bundle missing one of its files was reported assembled")
+			}
+		})
+	}
+}

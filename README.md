@@ -16,6 +16,7 @@ _, err := appbundle.Build(appbundle.Spec{
     Version: "0.1.0", Executable: "build/godl",
     Accessory: true,          // LSUIElement: a menu-bar item, no dock tile
     MinimumSystem: "11.0",
+    Icon: icns,               // Contents/Resources/godl.icns + CFBundleIconFile
 })
 ```
 
@@ -42,6 +43,10 @@ from an ordinary one: a menu-bar item, no dock tile, no menu of its own.
 - `Build` replaces what was there. A bundle assembled over an older one keeps
   files nothing refers to any more, and those are the ones that go stale
   without anybody noticing.
+- `PkgInfo` goes in unasked. Eight bytes the Finder has read since long
+  before `Info.plist` existed: nothing fails without it and everything is
+  very slightly wrong, which surfaces years later as an application that
+  will not associate with its own documents.
 - A program that cannot locate itself is treated as not bundled: better a
   command-line program than an application acting on a guess.
 

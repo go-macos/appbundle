@@ -91,6 +91,13 @@ type Spec struct {
 	// MinimumSystem is the oldest macOS this claims to run on. Empty leaves
 	// the key out rather than inventing a floor.
 	MinimumSystem string
+	// Icon is a .icns file's bytes. Empty leaves the bundle without one,
+	// which is an application drawn as a blank page everywhere it appears.
+	//
+	// It is bytes rather than a path because assembling a bundle is the last
+	// step of a build, and by then the icon is as likely to be embedded in
+	// the builder as sitting on disk beside it.
+	Icon []byte
 }
 
 // Build assembles the bundle and reports where it put it.
@@ -126,6 +133,22 @@ func Build(s Spec) (Bundle, error) {
 	if err := writeFile(filepath.Join(app, "Contents", "Info.plist"), []byte(s.plist()), 0o644); err != nil {
 		return Bundle{}, fmt.Errorf("appbundle: write Info.plist: %w", err)
 	}
+	// Eight bytes the Finder has read since long before Info.plist existed.
+	// Nothing fails without it and everything is very slightly wrong: it is
+	// the sort of omission that surfaces years later as an application that
+	// will not associate with its own documents.
+	if err := writeFile(filepath.Join(app, "Contents", "PkgInfo"), []byte("APPL????"), 0o644); err != nil {
+		return Bundle{}, fmt.Errorf("appbundle: write PkgInfo: %w", err)
+	}
+	if len(s.Icon) > 0 {
+		res := filepath.Join(app, "Contents", "Resources")
+		if err := mkdirAll(res, 0o755); err != nil {
+			return Bundle{}, fmt.Errorf("appbundle: create %s: %w", res, err)
+		}
+		if err := writeFile(filepath.Join(res, s.Name+".icns"), s.Icon, 0o644); err != nil {
+			return Bundle{}, fmt.Errorf("appbundle: write the icon: %w", err)
+		}
+	}
 	return Bundle{Path: app, Name: s.Name}, nil
 }
 
@@ -152,6 +175,9 @@ func (s Spec) plist() string {
 	pair("CFBundleVersion", version)
 	if s.MinimumSystem != "" {
 		pair("LSMinimumSystemVersion", s.MinimumSystem)
+	}
+	if len(s.Icon) > 0 {
+		pair("CFBundleIconFile", s.Name)
 	}
 	if s.Accessory {
 		b.WriteString("\t<key>LSUIElement</key>\n\t<true/>\n")
