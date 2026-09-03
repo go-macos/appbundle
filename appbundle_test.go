@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -93,11 +94,30 @@ func TestAnAssembledBundleHoldsWhatMacOSReads(t *testing.T) {
 
 	// The executable is copied, and copied runnable: a bundle whose program
 	// is not executable is an application that will not start.
+	//
+	// Except on Windows, where there is no execute bit to observe. os.Chmod
+	// documents that "only the 0o200 bit (owner writable) of mode is used; it
+	// controls whether the file's read-only attribute is set or cleared. The
+	// other bits are currently unused" -- and Stat synthesises the mode back
+	// from that single NTFS attribute as 0444 or 0666 (os/types_windows.go
+	// fileStat.mode). So Perm()&0o111 is zero for EVERY file on Windows, and
+	// the -rw-rw-rw- this assertion reported is just the 0666 branch.
+	//
+	// That is not a defect in Build, and a bare skip would be the wrong fix
+	// because it would hide a fact about the artefact: a .app assembled on
+	// Windows reaches macOS without its executable bit, and whatever carries
+	// it across -- a tar, a zip with Unix extras, an scp -- has to put the bit
+	// back. So assert what the running platform can actually hold, and say
+	// which is which.
 	fi, err := os.Stat(filepath.Join(b.Path, "Contents", "MacOS", "godl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm()&0o111 == 0 {
+	if runtime.GOOS == "windows" {
+		if fi.IsDir() || fi.Size() == 0 {
+			t.Errorf("the executable did not arrive: mode %v, %d bytes", fi.Mode(), fi.Size())
+		}
+	} else if fi.Mode().Perm()&0o111 == 0 {
 		t.Errorf("the executable went in with mode %v", fi.Mode().Perm())
 	}
 
