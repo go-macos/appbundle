@@ -6,6 +6,14 @@ inside one, and how to assemble one around an executable.** Pure Go,
 tested on every platform, which is what makes a bundle assembler useful in a
 cross-compiling build.
 
+> **Assembling on Windows.** The executable is written with mode `0o755`, but
+> Windows keeps no execute bit: `os.Chmod` there uses only the `0o200`
+> (owner-writable) bit to set or clear the read-only attribute, and `Stat`
+> synthesises the mode back as `0444` or `0666`. A bundle assembled on a
+> Windows host therefore arrives on macOS without its executable bit, and
+> whatever carries it across — a tar, a zip with Unix extras, an `scp` — has to
+> restore it. Assembling on macOS or Linux is unaffected.
+
 ```go
 if b, ok := appbundle.Running(); ok {
     // Launched from the Finder: no arguments, and a menu bar to live in.
