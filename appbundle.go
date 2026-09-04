@@ -21,8 +21,10 @@ package appbundle
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -91,6 +93,22 @@ type Spec struct {
 	// MinimumSystem is the oldest macOS this claims to run on. Empty leaves
 	// the key out rather than inventing a floor.
 	MinimumSystem string
+	// UsageDescriptions are the NS...UsageDescription strings this program
+	// needs, keyed by the plist key -- "NSCameraUsageDescription" and the like.
+	//
+	// ⛔ WITHOUT THE RIGHT ONE, macOS DOES NOT DENY THE PROGRAM, IT ENDS IT.
+	// Touching a camera, a microphone, the Photos library or a dozen other
+	// things from a program with no usage description for it is not a refusal a
+	// caller can handle: TCC terminates the process with "This app has crashed
+	// because it attempted to access privacy-sensitive data without a usage
+	// description". A bare binary has no Info.plist at all, which is why a
+	// program that needs any of these has to be a bundle.
+	//
+	// The value is shown to the person in the prompt, so it is a SENTENCE about
+	// what this program wants it for -- "XR desk shows what the glasses see" --
+	// and not the name of an API.
+	UsageDescriptions map[string]string
+
 	// Icon is a .icns file's bytes. Empty leaves the bundle without one,
 	// which is an application drawn as a blank page everywhere it appears.
 	//
@@ -162,8 +180,13 @@ func (s Spec) plist() string {
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">` + "\n")
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
+	// ⛔ ESCAPED. A plist is XML, and an application called "Bed & Breakfast"
+	// or a usage description with an apostrophe in it would otherwise produce a
+	// file macOS cannot parse -- which does not fail loudly either: a bundle
+	// with an unreadable Info.plist is a bundle the Finder refuses to open, with
+	// no message that names the reason.
 	pair := func(k, v string) {
-		fmt.Fprintf(&b, "\t<key>%s</key>\n\t<string>%s</string>\n", k, v)
+		fmt.Fprintf(&b, "\t<key>%s</key>\n\t<string>%s</string>\n", plistEscape(k), plistEscape(v))
 	}
 	pair("CFBundleName", s.Name)
 	pair("CFBundleDisplayName", s.Name)
@@ -182,7 +205,40 @@ func (s Spec) plist() string {
 	if s.Accessory {
 		b.WriteString("\t<key>LSUIElement</key>\n\t<true/>\n")
 	}
+	// In a stable order, so the same Spec always produces the same file: a
+	// bundle whose plist changes between builds for no reason is a bundle that
+	// looks modified to everything that watches it.
+	for _, k := range slices.Sorted(maps.Keys(s.UsageDescriptions)) {
+		pair(k, s.UsageDescriptions[k])
+	}
 	b.WriteString("\t<key>NSHighResolutionCapable</key>\n\t<true/>\n")
 	b.WriteString("</dict>\n</plist>\n")
+	return b.String()
+}
+
+// plistEscape makes a string safe to put between XML tags.
+//
+// The five predefined entities, and no more: a plist is read by CFPropertyList
+// rather than by a general parser, and inventing numeric escapes for anything
+// else would produce a file that is valid XML and not the string that was
+// meant.
+func plistEscape(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '&':
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '"':
+			b.WriteString("&quot;")
+		case '\'':
+			b.WriteString("&apos;")
+		default:
+			b.WriteRune(r)
+		}
+	}
 	return b.String()
 }
