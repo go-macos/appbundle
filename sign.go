@@ -82,7 +82,7 @@ func (b Bundle) Sign(s Signer) error {
 	}
 	args = append(args, b.Path)
 
-	out, err := exec.Command("codesign", args...).CombinedOutput()
+	out, err := exec.Command(codesignProgram, args...).CombinedOutput()
 	if err != nil {
 		// codesign says what is wrong on stderr and says nothing useful in the
 		// exit status, so the output is the error.
@@ -101,7 +101,7 @@ func (b Bundle) Sign(s Signer) error {
 // in differ in whether the grant survives a rebuild, and they are told apart by
 // reading them: one names a cdhash, the other an identifier and a certificate.
 func (b Bundle) DesignatedRequirement() (string, error) {
-	out, err := exec.Command("codesign", "-d", "-r-", b.Path).CombinedOutput()
+	out, err := exec.Command(codesignProgram, "-d", "-r-", b.Path).CombinedOutput()
 	if err != nil {
 		if msg := strings.TrimSpace(string(out)); msg != "" {
 			return "", fmt.Errorf("appbundle: read the requirement of %s: %w: %s", b.Path, err, msg)
@@ -160,3 +160,12 @@ func plistUnescape(s string) string {
 		"&amp;", "&",
 	).Replace(s)
 }
+
+// codesignProgram is the signing tool, named rather than spelled out at the
+// two places it is run.
+//
+// It is a variable because the tool exists on exactly one operating system,
+// and everything here has to be exercised on the others too: a signing step
+// that is only ever tested where it happens to work is a signing step whose
+// error handling nobody has ever run.
+var codesignProgram = "codesign"
